@@ -7,7 +7,8 @@
 
 package frc.robot.subsystems.superstructure;
 
-import static edu.wpi.first.units.Units.RotationsPerSecond;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.MetersPerSecondPerSecond;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.*;
 import static frc.robot.util.SparkUtil.*;
 
@@ -21,7 +22,7 @@ import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkFlexConfig;
-import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.LinearVelocity;
 import java.util.function.DoubleSupplier;
 
 /**
@@ -52,11 +53,13 @@ public class SuperstructureIOSpark implements SuperstructureIO {
     var shooterFollowerConfig =
         configureMotor(shooterFollower, shooterFollowerMotorReduction, shooterFollowerInverted);
 
-    // indexerConfig.closedLoop.feedForward.sv(indexerKs, indexerKv);
-    // indexerConfig.closedLoop.pid(indexerKp, 0.0, indexerKd);
+    indexerConfig.closedLoop.feedForward.sva(indexerKs, indexerKv, indexerKa);
+    indexerConfig.closedLoop.pid(indexerKp, 0.0, 0.0);
 
-    // shooterLeaderConfig.closedLoop.feedForward.sv(shooterKs, shooterKv);
-    // shooterLeaderConfig.closedLoop.pid(shooterKp, 0.0, shooterKd);
+    shooterLeaderConfig.closedLoop.feedForward.sva(shooterKs, shooterKv, shooterKa);
+    shooterLeaderConfig.closedLoop.pid(shooterKp, 0.0, 0.0);
+    shooterLeaderConfig.closedLoop.maxMotion.maxAcceleration(
+        shooterMaxAcceleration.in(MetersPerSecondPerSecond));
 
     shooterFollowerConfig.follow(shooterLeaderCanId, true);
 
@@ -86,6 +89,8 @@ public class SuperstructureIOSpark implements SuperstructureIO {
     inputs.shooterVelocityRadPerSec = shooterInputs.velocityRadPerSec;
     inputs.shooterAppliedVolts = shooterInputs.appliedVolts;
     inputs.shooterCurrentAmps = shooterInputs.currentAmps;
+
+    inputs.shooterSetpoint = shooterLeaderController.getSetpoint();
   }
 
   @Override
@@ -104,13 +109,16 @@ public class SuperstructureIOSpark implements SuperstructureIO {
   }
 
   @Override
-  public void setIndexerVelocity(AngularVelocity velocity) {
-    indexerController.setSetpoint(velocity.in(RotationsPerSecond), ControlType.kVelocity);
+  public void setIndexerVelocity(LinearVelocity velocity) {
+    indexerController.setSetpoint(velocity.in(MetersPerSecond), ControlType.kVelocity);
+    // indexerController.setSetpoint(currentLimit, ControlType.kMAXMotionVelocityControl);
   }
 
   @Override
-  public void setShooterVelocity(AngularVelocity velocity) {
-    shooterLeaderController.setSetpoint(velocity.in(RotationsPerSecond), ControlType.kVelocity);
+  public void setShooterVelocity(LinearVelocity velocity) {
+    // shooterLeaderController.setSetpoint(velocity.in(MetersPerSecond), ControlType.kVelocity);
+    shooterLeaderController.setSetpoint(
+        velocity.in(MetersPerSecond), ControlType.kMAXMotionVelocityControl);
   }
 
   private static SparkFlexConfig configureMotor(
@@ -119,13 +127,12 @@ public class SuperstructureIOSpark implements SuperstructureIO {
     config
         .idleMode(IdleMode.kBrake)
         .smartCurrentLimit(currentLimit)
-        // .voltageCompensation(voltageCompensation)
-        .inverted(inverted)
-        .disableVoltageCompensation();
+        .voltageCompensation(voltageCompensation)
+        .inverted(inverted);
     config
         .encoder
         .positionConversionFactor(motorReduction) // Rotor Rotations -> Roller Radians
-        .velocityConversionFactor(motorReduction)
+        .velocityConversionFactor(motorReduction / 60)
         .uvwMeasurementPeriod(10)
         .uvwAverageDepth(2);
 

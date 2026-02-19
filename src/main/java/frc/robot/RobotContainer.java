@@ -49,9 +49,14 @@ public class RobotContainer {
     controller.rightTrigger().whileTrue(superstructure.shootDashboardVoltage());
     controller.leftTrigger().whileTrue(superstructure.shootDashboardVelocity());
 
-    controller.a().whileTrue(superstructure.tuneIndexer());
-    controller.x().whileTrue(superstructure.tuneShooter());
-    controller.y().whileTrue(superstructure.justGo());
+    // controller.a().whileTrue(superstructure.tuneIndexer());
+    // controller.x().whileTrue(superstructure.tuneShooter());
+    // controller.y().whileTrue(superstructure.justGo());
+
+    controller.a().whileTrue(superstructure.sysIDQuasistaticReverse());
+    controller.x().whileTrue(superstructure.sysIDQuasistaticForward());
+    controller.b().whileTrue(superstructure.sysIDDynamicReverse());
+    controller.y().whileTrue(superstructure.sysIDDynamicForward());
   }
 
   /**

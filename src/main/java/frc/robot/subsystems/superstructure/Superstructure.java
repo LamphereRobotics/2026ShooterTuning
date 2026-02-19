@@ -7,27 +7,30 @@
 
 package frc.robot.subsystems.superstructure;
 
-import static edu.wpi.first.units.Units.RotationsPerSecond;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.Volts;
+import static frc.robot.subsystems.superstructure.SuperstructureConstants.shooterVelocityTolerance;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.shootingFeederVoltage;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.shootingIndexerVelocity;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.shootingIndexerVoltage;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.shootingShooterVelocity;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.shootingShooterVoltage;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.spinUpFeederVoltage;
-import static frc.robot.subsystems.superstructure.SuperstructureConstants.spinUpIndexerVelocity;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.spinUpIndexerVoltage;
-import static frc.robot.subsystems.superstructure.SuperstructureConstants.spinUpSeconds;
-import static frc.robot.subsystems.superstructure.SuperstructureConstants.spinUpShooterVelocity;
 import static frc.robot.subsystems.superstructure.SuperstructureConstants.spinUpShooterVoltage;
 
+import edu.wpi.first.units.measure.LinearVelocity;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
+import java.util.function.BooleanSupplier;
 import org.littletonrobotics.junction.Logger;
 
 public class Superstructure extends SubsystemBase {
   private final SuperstructureIO io;
   private final SuperstructureIOInputsAutoLogged inputs = new SuperstructureIOInputsAutoLogged();
+  private final SysIdRoutine sysIdRoutine;
 
   public Superstructure(SuperstructureIO io) {
     this.io = io;
@@ -39,16 +42,24 @@ public class Superstructure extends SubsystemBase {
     SmartDashboard.putNumber("Shooting/Shooter/Voltage", shootingShooterVoltage);
 
     SmartDashboard.putNumber(
-        "SpinUp/Indexer/Velocity", spinUpIndexerVelocity.in(RotationsPerSecond));
+        "Shooting/Indexer/Velocity", shootingIndexerVelocity.in(MetersPerSecond));
     SmartDashboard.putNumber(
-        "SpinUp/Shooter/Velocity", spinUpShooterVelocity.in(RotationsPerSecond));
-    SmartDashboard.putNumber(
-        "Shooting/Indexer/Velocity", shootingIndexerVelocity.in(RotationsPerSecond));
-    SmartDashboard.putNumber(
-        "Shooting/Shooter/Velocity", shootingShooterVelocity.in(RotationsPerSecond));
+        "Shooting/Shooter/Velocity", shootingShooterVelocity.in(MetersPerSecond));
 
     SmartDashboard.putNumber("Tuning/Indexer/Velocity", 0.0);
     SmartDashboard.putNumber("Tuning/Shooter/Velocity", 0.0);
+
+    sysIdRoutine =
+        new SysIdRoutine(
+            new SysIdRoutine.Config(
+                null,
+                null,
+                null, // Use default config
+                (state) -> Logger.recordOutput("SysIdTestState", state.toString())),
+            new SysIdRoutine.Mechanism(
+                (voltage) -> io.setShooterVoltage(voltage.in(Volts)),
+                null, // No log consumer, since data is recorded by AdvantageKit
+                this));
   }
 
   @Override
@@ -64,7 +75,7 @@ public class Superstructure extends SubsystemBase {
           io.setIndexerVoltage(spinUpIndexerVoltage);
           io.setShooterVoltage(spinUpShooterVoltage);
         })
-        .withTimeout(spinUpSeconds)
+        .until(shooterVelocityIsGood(shootingShooterVelocity))
         .andThen(
             run(
                 () -> {
@@ -72,35 +83,27 @@ public class Superstructure extends SubsystemBase {
                   io.setIndexerVoltage(shootingIndexerVoltage);
                   io.setShooterVoltage(shootingShooterVoltage);
                 }))
-        .finallyDo(
-            () -> {
-              io.setFeederVoltage(0.0);
-              io.setIndexerVoltage(0.0);
-              io.setShooterVoltage(0.0);
-            });
+        .finallyDo(this::stopShooter);
   }
 
   /** Set the rollers to the values for launching. Spins up before feeding fuel. */
   public Command launchVelocity() {
     return run(() -> {
           io.setFeederVoltage(spinUpFeederVoltage);
-          io.setIndexerVelocity(spinUpIndexerVelocity);
-          io.setShooterVelocity(spinUpShooterVelocity);
+          // io.setIndexerVelocity(shootingIndexerVelocity);
+          io.setIndexerVoltage(shootingIndexerVoltage);
+          io.setShooterVelocity(shootingShooterVelocity);
         })
-        .withTimeout(spinUpSeconds)
+        .until(shooterVelocityIsGood(shootingShooterVelocity))
         .andThen(
             run(
                 () -> {
                   io.setFeederVoltage(shootingFeederVoltage);
-                  io.setIndexerVelocity(shootingIndexerVelocity);
+                  // io.setIndexerVelocity(shootingIndexerVelocity);
+                  io.setIndexerVoltage(shootingIndexerVoltage);
                   io.setShooterVelocity(shootingShooterVelocity);
                 }))
-        .finallyDo(
-            () -> {
-              io.setFeederVoltage(0.0);
-              io.setIndexerVoltage(0.0);
-              io.setShooterVoltage(0.0);
-            });
+        .finallyDo(this::stopShooter);
   }
 
   public Command shootDashboardVoltage() {
@@ -115,7 +118,7 @@ public class Superstructure extends SubsystemBase {
           io.setIndexerVoltage(dashboardSpinUpIndexerVoltage);
           io.setShooterVoltage(dashboardSpinUpShooterVoltage);
         })
-        .withTimeout(spinUpSeconds)
+        .until(shooterVelocityIsGood(shootingShooterVelocity))
         .andThen(
             run(
                 () -> {
@@ -129,12 +132,7 @@ public class Superstructure extends SubsystemBase {
                   io.setIndexerVoltage(dashboardShootingIndexerVoltage);
                   io.setShooterVoltage(dashboardShootingShooterVoltage);
                 }))
-        .finallyDo(
-            () -> {
-              io.setFeederVoltage(0.0);
-              io.setIndexerVoltage(0.0);
-              io.setShooterVoltage(0.0);
-            });
+        .finallyDo(this::stopShooter);
   }
 
   public Command shootDashboardVelocity() {
@@ -146,10 +144,10 @@ public class Superstructure extends SubsystemBase {
           double dashboardSpinUpShooterVelocity =
               SmartDashboard.getNumber("SpinUp/Shooter/Velocity", 0.0);
           io.setFeederVoltage(dashboardSpinUpFeederVoltage);
-          io.setIndexerVelocity(RotationsPerSecond.of(dashboardSpinUpIndexerVelocity));
-          io.setShooterVelocity(RotationsPerSecond.of(dashboardSpinUpShooterVelocity));
+          io.setIndexerVelocity(MetersPerSecond.of(dashboardSpinUpIndexerVelocity));
+          io.setShooterVelocity(MetersPerSecond.of(dashboardSpinUpShooterVelocity));
         })
-        .withTimeout(spinUpSeconds)
+        .until(shooterVelocityIsGood(shootingShooterVelocity))
         .andThen(
             run(
                 () -> {
@@ -160,22 +158,17 @@ public class Superstructure extends SubsystemBase {
                   double dashboardShootingShooterVelocity =
                       SmartDashboard.getNumber("Shooting/Shooter/Velocity", 0.0);
                   io.setFeederVoltage(dashboardShootingFeederVoltage);
-                  io.setIndexerVelocity(RotationsPerSecond.of(dashboardShootingIndexerVelocity));
-                  io.setShooterVelocity(RotationsPerSecond.of(dashboardShootingShooterVelocity));
+                  io.setIndexerVelocity(MetersPerSecond.of(dashboardShootingIndexerVelocity));
+                  io.setShooterVelocity(MetersPerSecond.of(dashboardShootingShooterVelocity));
                 }))
-        .finallyDo(
-            () -> {
-              io.setFeederVoltage(0.0);
-              io.setIndexerVoltage(0.0);
-              io.setShooterVoltage(0.0);
-            });
+        .finallyDo(this::stopShooter);
   }
 
   public Command tuneIndexer() {
     double dashboardTuningIndexerVelocity =
         SmartDashboard.getNumber("Tuning/Indexer/Velocity", 0.0);
     return runEnd(
-        () -> io.setIndexerVelocity(RotationsPerSecond.of(dashboardTuningIndexerVelocity)),
+        () -> io.setIndexerVelocity(MetersPerSecond.of(dashboardTuningIndexerVelocity)),
         () -> io.setIndexerVoltage(0.0));
   }
 
@@ -183,7 +176,7 @@ public class Superstructure extends SubsystemBase {
     double dashboardTuningShooterVelocity =
         SmartDashboard.getNumber("Tuning/Shooter/Velocity", 0.0);
     return runEnd(
-        () -> io.setShooterVelocity(RotationsPerSecond.of(dashboardTuningShooterVelocity)),
+        () -> io.setShooterVelocity(MetersPerSecond.of(dashboardTuningShooterVelocity)),
         () -> io.setShooterVoltage(0.0));
   }
 
@@ -199,5 +192,33 @@ public class Superstructure extends SubsystemBase {
               io.setIndexerVoltage(0.0);
               io.setShooterVoltage(0.0);
             });
+  }
+
+  private BooleanSupplier shooterVelocityIsGood(LinearVelocity targetVelocity) {
+    return () ->
+        MetersPerSecond.of(inputs.shooterVelocityRadPerSec)
+            .isNear(targetVelocity, shooterVelocityTolerance);
+  }
+
+  private void stopShooter() {
+    io.setFeederVoltage(0.0);
+    io.setIndexerVoltage(0.0);
+    io.setShooterVoltage(0.0);
+  }
+
+  public Command sysIDQuasistaticForward() {
+    return sysIdRoutine.quasistatic(SysIdRoutine.Direction.kForward);
+  }
+
+  public Command sysIDQuasistaticReverse() {
+    return sysIdRoutine.quasistatic(SysIdRoutine.Direction.kReverse);
+  }
+
+  public Command sysIDDynamicForward() {
+    return sysIdRoutine.dynamic(SysIdRoutine.Direction.kForward);
+  }
+
+  public Command sysIDDynamicReverse() {
+    return sysIdRoutine.dynamic(SysIdRoutine.Direction.kReverse);
   }
 }
